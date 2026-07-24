@@ -11,7 +11,7 @@
 	- Если используете браузер **Google Chrome** нажмите на ссылку **[Tampermonkey в  интернет-магазин chrome](https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo?hl=ru)**
 2. Нажмите на кнопку ниже для установки скрипта:
 
-👉 **[УСТАНОВИТЬ СКРИПТ](https://github.com/Wise0ther/gw_resource_analysis/raw/refs/heads/main/gwars-res-calc.user.js)** *(откроется окно Tampermonkey с предложением установить)*.
+👉 **[УСТАНОВИТЬ СКРИПТ](https://github.com/Wise0ther/gw_resource_analysis/raw/main/gwars-res-calc.user.js)** *(откроется окно Tampermonkey с предложением установить)*.
 
 ---
 
