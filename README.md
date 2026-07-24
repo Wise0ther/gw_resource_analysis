@@ -6,7 +6,9 @@
 
 ### 🚀 Быстрая установка
 
-1. Установите расширение для браузера **[Tampermonkey](https://www.tampermonkey.net/)** или **Violentmonkey**.
+1. Установите расширение для браузера **Tampermonkey**.
+	- Если используете браузер **Mozilla Firefox** нажмите на ссылку **[Tampermonkey в Firefox Add-ons](https://addons.mozilla.org/ru/firefox/addon/tampermonkey/)**
+	- Если используете браузер **Google Chrome** нажмите на ссылку **[Tampermonkey в  интернет-магазин chrome](https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo?hl=ru)**
 2. Нажмите на кнопку ниже для установки скрипта:
 
 👉 **[УСТАНОВИТЬ СКРИПТ](https://github.com/Wise0ther/gw_resource_analysis/raw/refs/heads/main/gwars-res-calc.user.js)** *(откроется окно Tampermonkey с предложением установить)*.
