@@ -9,7 +9,9 @@
 1. Установите расширение для браузера **Tampermonkey**.
 	- Если используете браузер **Mozilla Firefox** нажмите на ссылку **[Tampermonkey в Firefox Add-ons](https://addons.mozilla.org/ru/firefox/addon/tampermonkey/)**
 	- Если используете браузер **Google Chrome** нажмите на ссылку **[Tampermonkey в  интернет-магазин chrome](https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo?hl=ru)**
-2. Нажмите на кнопку ниже для установки скрипта:
+2. После установки **Tampermonkey** нужно разрешить использование пользовательских скриптов:
+	- **Google Chrome** открыть `chrome://extensions/` > Нажмите кнопку Сведения Tampermonkey > Активировать ползунок Разрешить пользовательские скрипты
+3. Нажмите на кнопку ниже для установки скрипта:
 
 👉 **[УСТАНОВИТЬ СКРИПТ](https://github.com/Wise0ther/gw_resource_analysis/raw/main/gwars-res-calc.user.js)** *(откроется окно Tampermonkey с предложением установить)*.
 
@@ -40,6 +42,11 @@
 ### 🐛 Сообщить об ошибке или предложении
 
 Если вы нашли баг или у вас есть идея по улучшению, пожалуйста, создайте тему в разделе **[Issues](https://github.com/Wise0ther/gw_resource_analysis/issues)** нашего репозитория.
+
+---
+
+## 📄 Лицензия
+Этот проект распространяется под лицензией [MIT](LICENSE).
 
 ---
 *Разработано при поддержке AI-ассистента.*
