@@ -1,10 +1,14 @@
 // ==UserScript==
-// @name         GWars - Калькулятор Торговли Ресурсами
-// @namespace    http://tampermonkey.net/
-// @version      3.1.0
+// @name         gwars-res-calc
+// @namespace    https://github.com/Wise0ther/gw_resource_analysis
+// @version      3.2.0
 // @description  Автоматический сбор протоколов передач и калькулятор прибыли ТОЛЬКО по ресурсам
-// @author       You
+// @author       Бурый_Медведь использован чат помощники
 // @match        *://www.gwars.io/transfers.php?user_id=*
+// @icon https://www.google.com/s2/favicons?domain=gwars.io
+// @downloadURL  https://raw.githubusercontent.com/Wise0ther/gw_resource_analysis/main/gw_resource_analysis.user.js
+// @updateURL    https://raw.githubusercontent.com/Wise0ther/gw_resource_analysis/main/gw_resource_analysis.user.js
+// @homepageURL  https://github.com/Wise0ther/gw_resource_analysis
 // @grant        none
 // ==/UserScript==
 
@@ -33,6 +37,37 @@
             const [day, month, year] = d.split('.');
             const [hours, minutes, seconds] = t ? t.split(':') : ['00', '00', '00'];
             return new Date(`20${year}-${month}-${day}T${hours}:${minutes}:${seconds || '00'}`);
+        },
+
+        // Уникальный идентификатор сделки.
+        // Если известен object_id — комбинируем его с датой/временем (секундная точность):
+        // один и тот же торговый объект физически не может провести две разные
+        // сделки в одну и ту же секунду, поэтому это надёжный ключ.
+        // Если object_id по какой-то причине не распознан (например, старые записи,
+        // сохранённые до этого обновления) — используем резервный ключ, как раньше.
+        logUid(log) {
+            if (log.objectId) {
+                return `oid:${log.objectId}_${log.date}`;
+            }
+            return `legacy:${log.date}_${log.type}_${log.resource}_${log.sum}_${log.count}`;
+        },
+
+        // Конвертация между внутренним форматом дат (ДД.ММ.ГГ) и форматом
+        // <input type="date"> (ГГГГ-ММ-ДД), нужным для календарного пикера.
+        internalToIso(internal) {
+            if (!internal) return '';
+            const parts = internal.trim().split('.');
+            if (parts.length !== 3) return '';
+            const [d, m, y] = parts;
+            return `20${y}-${m}-${d}`;
+        },
+
+        isoToInternal(iso) {
+            if (!iso) return '';
+            const parts = iso.split('-');
+            if (parts.length !== 3) return '';
+            const [y, m, d] = parts;
+            return `${d}.${m}.${y.slice(2)}`;
         }
     };
 
@@ -68,13 +103,20 @@
                     let matchRes = content.match(resourceRegex);
 
                     if (matchRes) {
+                        // Извлекаем object_id — первое число после "#" в начале записи
+                        // (например: "Объект #180476, Бурый_Медведь продал...").
+                        // Используется для надёжной дедупликации (см. GW_Utils.logUid).
+                        const objectIdMatch = content.match(/#(\d+)/);
+                        const objectId = objectIdMatch ? objectIdMatch[1] : null;
+
                         extracted.push({
                             date: fullDateStr.trim(),
                             type: matchRes[1].toLowerCase(),
                             count: parseInt(matchRes[2], 10),
                             resource: matchRes[3].trim(),
                             sum: parseInt(matchRes[4], 10),
-                            pricePerUnit: parseInt(matchRes[5], 10)
+                            pricePerUnit: parseInt(matchRes[5], 10),
+                            objectId: objectId
                         });
                     }
                 }
@@ -135,6 +177,8 @@
         license: '0',
         transportActive: false,
         transportCost: 0,
+        autoCleanEnabled: true,
+        autoCleanDays: 30,
         ...getDefaultDates()
     };
 
@@ -152,8 +196,70 @@
 
     let settings = { ...defaultSettings, ...savedSettings };
     localStorage.setItem(settingsKey, JSON.stringify(settings));
+
     // ==========================================
-    // 4. СКАНИРОВАНИЕ
+    // 4. АВТООЧИСТКА ПАМЯТИ
+    // ==========================================
+    function cleanOldLogs() {
+        if (!settings.autoCleanEnabled) return;
+
+        const days = parseInt(settings.autoCleanDays, 10) || 30;
+        const cutoff = new Date();
+        cutoff.setDate(cutoff.getDate() - days);
+
+        let logs = JSON.parse(localStorage.getItem(dbKey)) || [];
+        const filtered = logs.filter(log => GW_Utils.parseDate(log.date) >= cutoff);
+
+        if (filtered.length !== logs.length) {
+            localStorage.setItem(dbKey, JSON.stringify(filtered));
+            console.log(`GW Калькулятор: автоочистка удалила ${logs.length - filtered.length} старых записей (старше ${days} дн.)`);
+        }
+    }
+
+    function clearMemory() {
+        if (!confirm('Точно очистить все сохранённые данные по сделкам? Это действие необратимо.')) {
+            return;
+        }
+        localStorage.setItem(dbKey, JSON.stringify([]));
+        calculateAndRender();
+        alert('Память очищена.');
+    }
+
+    // ==========================================
+    // 5. ЭКСПОРТ В CSV
+    // ==========================================
+    function exportToCSV() {
+        const logs = JSON.parse(localStorage.getItem(dbKey)) || [];
+        if (logs.length === 0) {
+            alert('Нет данных для экспорта.');
+            return;
+        }
+
+        const header = ['Дата', 'Тип', 'Количество', 'Ресурс', 'Сумма (Гб)', 'Цена за ед. (Гб)', 'ID объекта'];
+        const rows = logs.map(l => [
+            l.date, l.type, l.count, l.resource, l.sum, l.pricePerUnit, l.objectId || ''
+        ]);
+
+        const csvContent = [header, ...rows]
+            .map(row => row.map(field => `"${String(field).replace(/"/g, '""')}"`).join(';'))
+            .join('\r\n');
+
+        // BOM в начале — чтобы Excel корректно определил кодировку UTF-8
+        const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        const today = new Date().toISOString().slice(0, 10);
+
+        a.href = url;
+        a.download = `gwars_resources_${userId}_${today}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
+    // ==========================================
+    // 6. СКАНИРОВАНИЕ
     // ==========================================
     async function startAutoScan() {
         const statusEl = document.getElementById('scan_status');
@@ -199,15 +305,23 @@
             }
         }
 
+        // Дедупликация по надёжному ключу (object_id + дата/время с точностью до секунды,
+        // либо резервный ключ для записей без object_id — см. GW_Utils.logUid)
         let merged = [...savedLogs];
+        const existingUids = new Set(merged.map(m => GW_Utils.logUid(m)));
+
         allNewLogs.forEach(newLog => {
-            if (!merged.some(m => m.date === newLog.date && m.resource === newLog.resource && m.sum === newLog.sum)) {
+            const uid = GW_Utils.logUid(newLog);
+            if (!existingUids.has(uid)) {
                 merged.push(newLog);
+                existingUids.add(uid);
             }
         });
 
         merged.sort((a, b) => GW_Utils.parseDate(b.date) - GW_Utils.parseDate(a.date));
         localStorage.setItem(dbKey, JSON.stringify(merged));
+
+        cleanOldLogs();
 
         statusEl.innerText = "Готово!";
         document.getElementById('gw_btn_scan').disabled = false;
@@ -216,7 +330,7 @@
     }
 
     // ==========================================
-    // 5. ИНТЕРФЕЙС И ОТРЕЗОВКА ТАБЛИЦ
+    // 7. ИНТЕРФЕЙС И ОТРИСОВКА ТАБЛИЦ
     // ==========================================
     function injectUI() {
         const targetTd = document.querySelector('td.greengreenbg table td[width="40%"][align="right"]') || document.body;
@@ -234,15 +348,32 @@
                     <div>
                         <span id="scan_status" style="color:blue; margin-right:10px; font-weight:bold;"></span>
                         <button id="gw_btn_scan" style="background:green; color:white; border:none; padding:2px 6px; cursor:pointer; font-weight:bold; border-radius:2px;">Обновить данные</button>
+                        <button id="gw_open_settings" title="Настройки" style="background:#666; color:white; border:none; padding:2px 6px; cursor:pointer; font-weight:bold; border-radius:2px; margin-left:4px;">⚙️</button>
                         <button id="gw_close_calc" style="font-weight:bold; cursor:pointer; margin-left:5px;">X</button>
                     </div>
                 </div>
 
+                <div id="gw_settings_panel" style="display:none; background:#fff; border:1px solid #999; border-radius:4px; padding:8px; margin-bottom:8px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                        <b style="color:#333;">Настройки хранилища</b>
+                        <button id="gw_close_settings" style="cursor:pointer; font-weight:bold;">X</button>
+                    </div>
+                    <div style="margin-bottom:6px;">
+                        <input type="checkbox" id="gw_autoclean_enabled" ${settings.autoCleanEnabled ? 'checked' : ''}>
+                        <b>Автоматическая очистка через</b>
+                        <input type="number" id="gw_autoclean_days" value="${settings.autoCleanDays}" min="1" style="width:50px; font-size:11px; text-align:center;"> дн.
+                    </div>
+                    <div style="display:flex; gap:6px; margin-bottom:4px;">
+                        <button id="gw_btn_clear_memory" style="flex:1; background:#993333; color:white; border:none; padding:4px; cursor:pointer; border-radius:3px;">Очистить память</button>
+                        <button id="gw_btn_export_csv" style="flex:1; background:#336633; color:white; border:none; padding:4px; cursor:pointer; border-radius:3px;">Сохранить в CSV</button>
+                    </div>
+                    <div style="font-size:9px; color:#888;">данные из браузера</div>
+                </div>
+
                 <div style="margin-bottom:8px;">
-                    <b>Период (ДД.ММ.ГГ):</b>
-                    С <input type="text" id="gw_date_from" value="${settings.dateFrom}" style="width:60px; font-size:11px; text-align:center;">
-                    По <input type="text" id="gw_date_to" value="${settings.dateTo}" style="width:60px; font-size:11px; text-align:center;">
-                    <button id="gw_btn_apply_dates" style="padding:1px 4px;">ОК</button>
+                    <b>Период:</b>
+                    С <input type="date" id="gw_date_from" value="${GW_Utils.internalToIso(settings.dateFrom)}" style="font-size:11px;">
+                    По <input type="date" id="gw_date_to" value="${GW_Utils.internalToIso(settings.dateTo)}" style="font-size:11px;">
                 </div>
 
                 <fieldset style="border:1px solid #999; margin-bottom:8px; padding:6px; border-radius:4px;">
@@ -275,19 +406,47 @@
             document.getElementById('gw_calc_window').style.display = 'none';
         });
 
+        document.getElementById('gw_open_settings').addEventListener('click', () => {
+            const panel = document.getElementById('gw_settings_panel');
+            panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+        });
+        document.getElementById('gw_close_settings').addEventListener('click', () => {
+            document.getElementById('gw_settings_panel').style.display = 'none';
+        });
+
         document.getElementById('gw_btn_scan').addEventListener('click', startAutoScan);
-        document.getElementById('gw_btn_apply_dates').addEventListener('click', saveAndRefresh);
+
+        document.getElementById('gw_btn_clear_memory').addEventListener('click', clearMemory);
+        document.getElementById('gw_btn_export_csv').addEventListener('click', exportToCSV);
+
+        document.getElementById('gw_autoclean_enabled').addEventListener('change', (e) => {
+            settings.autoCleanEnabled = e.target.checked;
+            localStorage.setItem(settingsKey, JSON.stringify(settings));
+        });
+        document.getElementById('gw_autoclean_days').addEventListener('input', (e) => {
+            settings.autoCleanDays = parseInt(e.target.value, 10) || 30;
+            localStorage.setItem(settingsKey, JSON.stringify(settings));
+        });
+
+        document.getElementById('gw_date_from').addEventListener('change', saveAndRefresh);
+        document.getElementById('gw_date_to').addEventListener('change', saveAndRefresh);
 
         document.querySelectorAll('input[name="gw_lic"]').forEach(r => r.addEventListener('change', saveAndRefresh));
         document.getElementById('gw_trans_active').addEventListener('change', saveAndRefresh);
         document.getElementById('gw_trans_cost').addEventListener('input', saveAndRefresh);
 
+        cleanOldLogs();
         calculateAndRender();
     }
 
     function saveAndRefresh() {
-        settings.dateFrom = document.getElementById('gw_date_from').value.trim();
-        settings.dateTo = document.getElementById('gw_date_to').value.trim();
+        const isoFrom = document.getElementById('gw_date_from').value;
+        const isoTo = document.getElementById('gw_date_to').value;
+
+        // Защита от пустого/некорректного выбора в календаре — не даём датам "сломаться"
+        if (isoFrom) settings.dateFrom = GW_Utils.isoToInternal(isoFrom);
+        if (isoTo) settings.dateTo = GW_Utils.isoToInternal(isoTo);
+
         settings.license = document.querySelector('input[name="gw_lic"]:checked').value;
         settings.transportActive = document.getElementById('gw_trans_active').checked;
         settings.transportCost = parseInt(document.getElementById('gw_trans_cost').value, 10) || 0;
