@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         gwars-res-calc
 // @namespace    https://github.com/Wise0ther/gw_resource_analysis
-// @version      3.2.0
+// @version      3.3.0
 // @description  Автоматический сбор протоколов передач и калькулятор прибыли ТОЛЬКО по ресурсам
 // @author       Бурый_Медведь использован чат помощники
 // @match        *://www.gwars.io/transfers.php?user_id=*
@@ -456,86 +456,123 @@
     }
 
     function calculateAndRender() {
-        const logs = JSON.parse(localStorage.getItem(dbKey)) || [];
-        let licenseExpense = GW_Utils.LICENSES[settings.license] || 0;
-        let transportExpense = settings.transportActive ? settings.transportCost : 0;
-        let totalOverheads = licenseExpense + transportExpense;
+    const logs = JSON.parse(localStorage.getItem(dbKey)) || [];
+    let licenseExpense = GW_Utils.LICENSES[settings.license] || 0;
+    let transportExpense = settings.transportActive ? settings.transportCost : 0;
+    let totalOverheads = licenseExpense + transportExpense;
 
-        let totalBuy = 0;
-        let totalSell = 0;
-        let resourcesData = {};
+    let totalBuy = 0;
+    let totalSell = 0;
+    let totalExp = 0; // ◄ Новый счетчик опыта
+    let resourcesData = {};
 
-        const minDate = GW_Utils.parseDate(settings.dateFrom + ' 00:00:00');
-        const maxDate = GW_Utils.parseDate(settings.dateTo + ' 23:59:59');
+    const minDate = GW_Utils.parseDate(settings.dateFrom + ' 00:00:00');
+    const maxDate = GW_Utils.parseDate(settings.dateTo + ' 23:59:59');
 
-        logs.forEach(log => {
-            const currentLogDate = GW_Utils.parseDate(log.date);
-            if (currentLogDate < minDate || currentLogDate > maxDate) return;
+    // Карта опыта за продажу 1 ед.
+    const EXP_MAP = {
+        'Алюминий': 0.2,
+        'Батареи': 0.2,
+        'Бокситы': 0.2,
+        'Ганджиум': 0.2,
+        'Сталь': 0.2,
+        'Водоросли': 0.1,
+        'Маковая соломка': 0.1,
+        'Нефть': 0.1,
+        'Пластик': 0.1,
+        'Резина': 0.1,
+        'Трава': 0.1,
+        'Табак': 0,
+        'Уран': 0.1
+    };
 
-            if (!resourcesData[log.resource]) {
-                resourcesData[log.resource] = { buyCount: 0, buySum: 0, sellCount: 0, sellSum: 0 };
-            }
+    logs.forEach(log => {
+        const currentLogDate = GW_Utils.parseDate(log.date);
+        if (currentLogDate < minDate || currentLogDate > maxDate) return;
 
-            if (log.type === 'продал') {
-                totalSell += log.sum;
-                resourcesData[log.resource].sellCount += log.count;
-                resourcesData[log.resource].sellSum += log.sum;
-            } else if (log.type === 'купил') {
-                totalBuy += log.sum;
-                resourcesData[log.resource].buyCount += log.count;
-                resourcesData[log.resource].buySum += log.sum;
-            }
-        });
-
-        let tradingProfit = totalSell - totalBuy;
-        let netProfit = tradingProfit - totalOverheads;
-
-        let resourceRows = '';
-        for (let resName in resourcesData) {
-            let data = resourcesData[resName];
-            let resProfit = data.sellSum - data.buySum;
-            let avgBuy = data.buyCount > 0 ? Math.round(data.buySum / data.buyCount) : 0;
-            let avgSell = data.sellCount > 0 ? Math.round(data.sellSum / data.sellCount) : 0;
-
-            resourceRows += `
-                <tr style="border-bottom:1px solid #ddd;">
-                    <td style="padding:5px;"><b>${resName}</b></td>
-                    <td style="color:green; text-align:right;">${data.sellCount} ед<br><small style="color:#666">${avgSell} Гб/ед</small></td>
-                    <td style="color:#993333; text-align:right;">${data.buyCount} ед<br><small style="color:#666">${avgBuy} Гб/ед</small></td>
-                    <td style="font-weight:bold; text-align:right; color:${resProfit >= 0 ? 'green' : 'red'};">${resProfit.toLocaleString('ru-RU')} Гб</td>
-                </tr>
-            `;
+        if (!resourcesData[log.resource]) {
+            resourcesData[log.resource] = { buyCount: 0, buySum: 0, sellCount: 0, sellSum: 0 };
         }
 
-        const bodyEl = document.getElementById('gw_calc_body');
-        if (!bodyEl) return;
+        if (log.type === 'продал') {
+            totalSell += log.sum;
+            resourcesData[log.resource].sellCount += log.count;
+            resourcesData[log.resource].sellSum += log.sum;
 
-        bodyEl.innerHTML = `
-            <div style="background:#fff; border:1px solid #ccc; padding:8px; margin-top:8px; border-radius:4px;">
-                <table style="width:100%; font-size:12px;">
-                    <tr><td><b>Оборот (Продажи):</b></td><td style="color:green; text-align:right; font-weight:bold;">+${totalSell.toLocaleString('ru-RU')} Гб</td></tr>
-                    <tr><td><b>Закупки:</b></td><td style="color:#993333; text-align:right; font-weight:bold;">-${totalBuy.toLocaleString('ru-RU')} Гб</td></tr>
-                    <tr style="border-top:1px solid #ccc;"><td><b>Торговый доход (Маржа):</b></td><td style="text-align:right; font-weight:bold;">${tradingProfit.toLocaleString('ru-RU')} Гб</td></tr>
-                    <tr><td><b>Накладные расходы:</b></td><td style="color:#993333; text-align:right;">-${totalOverheads.toLocaleString('ru-RU')} Гб</td></tr>
-                    <tr style="border-top:2px double #333; font-size:13px;">
-                        <td><b style="color:#336633;">ЧИСТАЯ ПРИБЫЛЬ:</b></td>
-                        <td style="text-align:right; font-weight:bold; color:${netProfit >= 0 ? 'green' : 'red'};">${netProfit.toLocaleString('ru-RU')} Гб</td>
-                    </tr>
-                </table>
-            </div>
+            // Расчет опыта за продажу:
+            let expPerUnit = 0;
+            if (EXP_MAP.hasOwnProperty(log.resource)) {
+                expPerUnit = EXP_MAP[log.resource];
+            } else if (log.resource.includes('(р)')) {
+                expPerUnit = 5.0; // Любое оружие/предмет с маркером (р)
+            }
 
-            <h4 style="margin:10px 0 5px 0; color:#333;">Анализ по ресурсам:</h4>
-            <table style="width:100%; border-collapse:collapse; font-size:11px; background:#fff; border:1px solid #ccc;">
-                <tr style="background:#e2ebe2; border-bottom:1px solid #999;">
-                    <th style="padding:5px; text-align:left;">Наименование</th>
-                    <th style="text-align:right; padding-right:5px;">Продажа</th>
-                    <th style="text-align:right; padding-right:5px;">Покупка</th>
-                    <th style="text-align:right; padding-right:5px;">Профит</th>
-                </tr>
-                ${resourceRows || '<tr><td colspan="4" style="text-align:center; padding:10px; color:#999;">Нет подходящих ресурсов за указанный период.</td></tr>'}
-            </table>
+            totalExp += log.count * expPerUnit;
+
+        } else if (log.type === 'купил') {
+            totalBuy += log.sum;
+            resourcesData[log.resource].buyCount += log.count;
+            resourcesData[log.resource].buySum += log.sum;
+        }
+    });
+
+    let tradingProfit = totalSell - totalBuy;
+    let netProfit = tradingProfit - totalOverheads;
+
+    let resourceRows = '';
+    for (let resName in resourcesData) {
+        let data = resourcesData[resName];
+        let resProfit = data.sellSum - data.buySum;
+        let avgBuy = data.buyCount > 0 ? Math.round(data.buySum / data.buyCount) : 0;
+        let avgSell = data.sellCount > 0 ? Math.round(data.sellSum / data.sellCount) : 0;
+
+        resourceRows += `
+            <tr style="border-bottom:1px solid #ddd;">
+                <td style="padding:5px;"><b>${resName}</b></td>
+                <td style="color:green; text-align:right;">${data.sellCount} ед<br><small style="color:#666">${avgSell} Гб/ед</small></td>
+                <td style="color:#993333; text-align:right;">${data.buyCount} ед<br><small style="color:#666">${avgBuy} Гб/ед</small></td>
+                <td style="font-weight:bold; text-align:right; color:${resProfit >= 0 ? 'green' : 'red'};">${resProfit.toLocaleString('ru-RU')} Гб</td>
+            </tr>
         `;
     }
+
+    const bodyEl = document.getElementById('gw_calc_body');
+    if (!bodyEl) return;
+
+    // Форматируем EXP с разделителем тысяч (пробелом)
+    const formattedExp = Number(totalExp.toFixed(1)).toLocaleString('ru-RU');
+
+    bodyEl.innerHTML = `
+        <div style="background:#fff; border:1px solid #ccc; padding:8px; margin-top:8px; border-radius:4px;">
+            <table style="width:100%; font-size:12px;">
+                <tr><td><b>Оборот (Продажи):</b></td><td style="color:green; text-align:right; font-weight:bold;">+${totalSell.toLocaleString('ru-RU')} Гб</td></tr>
+                <tr><td><b>Закупки:</b></td><td style="color:#993333; text-align:right; font-weight:bold;">-${totalBuy.toLocaleString('ru-RU')} Гб</td></tr>
+                <tr style="border-top:1px solid #ccc;"><td><b>Торговый доход (Маржа):</b></td><td style="text-align:right; font-weight:bold;">${tradingProfit.toLocaleString('ru-RU')} Гб</td></tr>
+                <tr><td><b>Накладные расходы:</b></td><td style="color:#993333; text-align:right;">-${totalOverheads.toLocaleString('ru-RU')} Гб</td></tr>
+                <tr style="border-top:2px double #333; font-size:13px;">
+                    <td><b style="color:#336633;">ЧИСТАЯ ПРИБЫЛЬ:</b></td>
+                    <td style="text-align:right; font-weight:bold; color:${netProfit >= 0 ? 'green' : 'red'};">${netProfit.toLocaleString('ru-RU')} Гб</td>
+                </tr>
+                <!-- Новая строчка под общей сводкой -->
+                <tr style="border-top:1px dashed #aaa; font-size:12px;">
+                    <td style="padding-top:4px;"><b>Получено эконом. опыта:</b></td>
+                    <td style="padding-top:4px; text-align:right; font-weight:bold; color:#005599;">+${formattedExp} EXP</td>
+                </tr>
+            </table>
+        </div>
+
+        <h4 style="margin:10px 0 5px 0; color:#333;">Анализ по ресурсам:</h4>
+        <table style="width:100%; border-collapse:collapse; font-size:11px; background:#fff; border:1px solid #ccc;">
+            <tr style="background:#e2ebe2; border-bottom:1px solid #999;">
+                <th style="padding:5px; text-align:left;">Наименование</th>
+                <th style="text-align:right; padding-right:5px;">Продажа</th>
+                <th style="text-align:right; padding-right:5px;">Покупка</th>
+                <th style="text-align:right; padding-right:5px;">Профит</th>
+            </tr>
+            ${resourceRows || '<tr><td colspan="4" style="text-align:center; padding:10px; color:#999;">Нет подходящих ресурсов за указанный период.</td></tr>'}
+        </table>
+    `;
+}
 
     injectUI();
 })();
